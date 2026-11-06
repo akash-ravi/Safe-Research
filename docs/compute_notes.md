@@ -10,5 +10,8 @@
 ### Known issue
 Python ≥3.11 fails on the TrainConfig() dataclass default (`failure_prob/conf/__init__.py:284`, `train: TrainConfig = TrainConfig()` -> "mutable default ... not allowed"); fix = `field(default_factory=TrainConfig)`, pending team approval. Not applied (SAFE baseline file). On 3.12 pytest fails at collection with this error.
 
+## Environment separation on CARC
+The detector repo (this repo) must not share an environment with the OpenVLA collection env, which pins `torch==2.2.0` / `transformers==4.40.1` (`vla-safe/openvla`). If they do share one env, install this repo with `pip install -e . --no-deps` so `setup.py` does not upgrade or replace the pinned torch. Preferred: two separate conda envs (collection vs. detector training/probing).
+
 ## T1–T7
 Not run yet. Require a session with CARC access.
