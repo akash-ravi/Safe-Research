@@ -31,7 +31,7 @@ ROOT=/scratch1/akashrav/data/<run>      # collection root: task00/ ... task09/, 
 mkdir -p $HOME/audits          # --json must be OUTSIDE $ROOT
 
 D=$(date +%Y%m%d)
-python experiments/robot/libero/audit_collection.py $ROOT \
+python experiments/robot/libero/audit_collection.py $ROOT [--fast] \
     --num-tasks 10 --n-episodes 50 --expect-seed 7 \
     --json $HOME/audits/pilot_$D.json > $HOME/audits/pilot_$D.md
 echo "audit exit=$?"     # 0 = clean, 1 = flagged (--warn-only forces 0)
@@ -57,3 +57,5 @@ Mapping from the pilot checks to audit output:
 | #12 tokens at pad edge (32000) | token checks table (`TOKEN_PAD_EDGE`) |
 
 Also covered: invalid episodes grouped by exception type, coverage (missing/duplicate `init_state_idx`), lengths and `max_steps` agreement (failures should be exactly the episodes at `max_steps`; `SUCCESS_AT_MAX` / `FAILURE_NOT_AT_MAX` are flagged), and metadata consistency across all episodes (checkpoint revision, `attn_implementation`, `center_crop`, `dtype`, code commits: any mix is `INCONSISTENT_META`). Token-rate warning thresholds default to 1e-3 (`--oor-rate-warn`, `--edge-rate-warn`). Paste the audit Markdown (or its path) into the Result column of the table above, with date, GPU type and commit.
+
+`--fast` reads only the `.meta.json` sidecars (quick, but a corrupt `.pt` goes undetected); use full mode for the pilot and `--fast` for routine progress checks during A8.
