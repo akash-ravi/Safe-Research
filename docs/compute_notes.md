@@ -13,5 +13,8 @@ Python ≥3.11 fails on the TrainConfig() dataclass default (`failure_prob/conf/
 ## Environment separation on CARC
 The detector repo (this repo) must not share an environment with the OpenVLA collection env, which pins `torch==2.2.0` / `transformers==4.40.1` (`vla-safe/openvla`). If they do share one env, install this repo with `pip install -e . --no-deps` so `setup.py` does not upgrade or replace the pinned torch. Preferred: two separate conda envs (collection vs. detector training/probing).
 
+## Collection metadata must record the attention implementation
+Hidden states differ numerically between `flash_attention_2`, `sdpa` and `eager`. The collector's `meta` must therefore include `attn_implementation` (default `flash_attention_2`, matching SAFE `run_libero_eval.py:72`), and the full collection (pilot through A8) must use one implementation throughout. T6 records the value in `t6_report.json`. `VLA_NORM_ATOL` stays at 0.0: re-applying the same norm module to the same input is expected to be bitwise identical; if it is not, report the numbers rather than loosening the tolerance.
+
 ## T1–T7
 Not run yet. Require a session with CARC access.

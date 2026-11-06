@@ -27,6 +27,8 @@ Checks (one observation, 7 generation states j = 0..6):
   3. the 7 greedy action-token ids are identical with and without hooks.
 Report is written to $VLA_T6_REPORT (default ./t6_report.json).
 Image source: LIBERO libero_10 task 0, init state 0, 10 dummy steps (as num_steps_wait).
+Task label is task.language; unnorm key follows run_libero_eval.py:121-132.
+attention implementation defaults to flash_attention_2 (VLA_ATTN overrides) and is recorded in the report.
 Set VLA_T6_SYNTH_IMAGE=1 to use a fixed random image instead (layer mapping does not depend on it).
 """
 import json
@@ -46,7 +48,9 @@ pytestmark = [
 
 NUM_BLOCKS = 32
 ACTION_DIM = 7
-UNNORM_KEY = "libero_10_no_noops"  # run_libero_eval: task_suite_name, then "_no_noops" if absent from norm_stats
+TASK_SUITE_NAME = "libero_10"
+TASK_ID = 0
+ATTN_IMPL = os.environ.get("VLA_ATTN", "flash_attention_2")  # fork/SAFE default (run_libero_eval.py:72)
 
 
 @pytest.fixture(scope="module")
@@ -61,39 +65,43 @@ def model_and_processor(fork):
     cfg = types.SimpleNamespace(
         model_family="openvla",
         pretrained_checkpoint=os.environ["VLA_CKPT"],
-        attn_implementation=os.environ.get("VLA_ATTN", "flash_attention_2"),  # fork default
+        attn_implementation=ATTN_IMPL,
         load_in_8bit=False,
         load_in_4bit=False,
         center_crop=True,
     )
     model = fork.get_vla(cfg).eval()
     processor = fork.get_processor(cfg)
-    unnorm_key = "libero_10"
+    # Copied from the fork's run_libero_eval.py:121-132 (cfg.unnorm_key = cfg.task_suite_name, then _no_noops fallback)
+    unnorm_key = TASK_SUITE_NAME
     if unnorm_key not in model.norm_stats and f"{unnorm_key}_no_noops" in model.norm_stats:
         unnorm_key = f"{unnorm_key}_no_noops"
-    assert unnorm_key in model.norm_stats, list(model.norm_stats)
+    assert unnorm_key in model.norm_stats, f"Action un-norm key {unnorm_key} not found in VLA `norm_stats`! {list(model.norm_stats)}"
     return model, processor, unnorm_key
 
 
 @pytest.fixture(scope="module")
-def image_uint8():
-    """Image at the get_libero_image output boundary (224x224x3 uint8, pre center-crop)."""
+def observation():
+    """(image, task_label): image at the get_libero_image output boundary (224x224x3 uint8, pre center-crop);
+    task_label = task.language, as in the fork (get_libero_env returns task.language)."""
     import numpy as np
-    if os.environ.get("VLA_T6_SYNTH_IMAGE") == "1":
-        return np.random.RandomState(0).randint(0, 255, (224, 224, 3), dtype=np.uint8)
     os.environ.setdefault("MUJOCO_GL", "egl")
     from libero.libero import benchmark
     from experiments.robot.libero.libero_utils import get_libero_dummy_action, get_libero_env, get_libero_image
-    suite = benchmark.get_benchmark_dict()["libero_10"]()
-    task = suite.get_task(0)
-    init_states = suite.get_task_init_states(0)
-    env, _ = get_libero_env(task, "openvla", resolution=256)
+    suite = benchmark.get_benchmark_dict()[TASK_SUITE_NAME]()
+    task = suite.get_task(TASK_ID)
+    task_label = task.language
+    if os.environ.get("VLA_T6_SYNTH_IMAGE") == "1":
+        return np.random.RandomState(0).randint(0, 255, (224, 224, 3), dtype=np.uint8), task_label
+    init_states = suite.get_task_init_states(TASK_ID)
+    env, task_description = get_libero_env(task, "openvla", resolution=256)
+    assert task_description == task_label
     try:
         env.reset()
         obs = env.set_init_state(init_states[0])
         for _ in range(10):
             obs, *_ = env.step(get_libero_dummy_action("openvla"))
-        return get_libero_image(obs, 224)
+        return get_libero_image(obs, 224), task_label
     finally:
         env.close()
 
@@ -126,10 +134,10 @@ def _predict(fork, model, processor, unnorm_key, image_uint8, task_label, output
     return out
 
 
-def test_layer_mapping(fork, model_and_processor, image_uint8):
+def test_layer_mapping(fork, model_and_processor, observation):
     model, processor, unnorm_key = model_and_processor
     layers, norm = _locate(model)
-    task_label = "put both the alphabet soup and the tomato sauce in the basket"  # libero_10 task 0
+    image_uint8, task_label = observation
 
     # --- reference: no hooks ---------------------------------------------------------------
     ref = _predict(fork, model, processor, unnorm_key, image_uint8, task_label)
@@ -172,7 +180,9 @@ def test_layer_mapping(fork, model_and_processor, image_uint8):
         assert len(block_out[k]) == ACTION_DIM, (k, len(block_out[k]))
     assert len(norm_in) == len(norm_out) == ACTION_DIM
 
-    report = {"tokens_ref": ref_tokens, "tokens_hooked": hooked_tokens,
+    report = {"attn_implementation": ATTN_IMPL, "unnorm_key": unnorm_key, "task_label": task_label,
+              "torch": torch.__version__, "gpu": torch.cuda.get_device_name(0),
+              "tokens_ref": ref_tokens, "tokens_hooked": hooked_tokens,
               "tokens_ref_no_output_hidden_states": ref_nohs_tokens,
               "block_max_abs_diff": {}, "norm": []}
 
